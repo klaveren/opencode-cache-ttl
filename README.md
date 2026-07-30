@@ -84,7 +84,7 @@ reaches the request.
 Proven with the `chat.params` hook, which receives the exact bag that becomes `providerOptions`:
 
 ```json
-{ "temCacheControl": false, "chavesDoBag": ["reasoningEffort", "thinking", "effort"] }
+{ "hasCacheControl": false, "bagKeys": ["reasoningEffort", "thinking", "effort"] }
 ```
 
 `ProviderTransform.options()` builds `result = {}` from scratch and reads exactly one key

@@ -224,7 +224,7 @@ Extrapolated to the gaps we actually measured in production (200k prefix, Opus 4
 | Real event | Before | After | This plugin alone? |
 | --- | --- | --- | --- |
 | 6.9-min subagent wait (150k tokens) | $0.94 | **$0.08** | ✅ yes — squarely in the 5m–1h band |
-| 3.5-hour gap (215k tokens) | $1.34 | **$0.43**¹ | ❌ no — needs `session-keepalive` |
+| 3.5-hour gap (215k tokens) | $1.34 | **$0.43**¹ | ❌ no — needs [`session-keepalive`](https://github.com/klaveren/opencode-session-keepalive) |
 | Total re-warms in one session | $2.39 | **~$0.51** | mixed |
 
 ¹ **Read this row carefully — it is the pair's number, not this plugin's.** A 3.5-hour gap is *past*

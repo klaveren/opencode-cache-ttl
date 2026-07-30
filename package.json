@@ -1,0 +1,39 @@
+{
+  "name": "opencode-cache-ttl",
+  "version": "1.0.0",
+  "description": "opencode plugin that upgrades Anthropic's prompt cache from a 5-minute TTL to 1 hour",
+  "type": "module",
+  "main": "./cache-ttl.js",
+  "exports": {
+    ".": "./cache-ttl.js"
+  },
+  "files": [
+    "cache-ttl.js",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "plugin",
+    "anthropic",
+    "claude",
+    "prompt-cache",
+    "cache",
+    "ttl",
+    "cost-optimization"
+  ],
+  "author": "Henrique Van Klaveren",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/klaveren/opencode-cache-ttl.git"
+  },
+  "bugs": {
+    "url": "https://github.com/klaveren/opencode-cache-ttl/issues"
+  },
+  "homepage": "https://github.com/klaveren/opencode-cache-ttl#readme",
+  "engines": {
+    "node": ">=18"
+  }
+}

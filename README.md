@@ -1,9 +1,37 @@
-# cache-ttl
+# opencode-cache-ttl
 
-> An opencode plugin that upgrades Anthropic's prompt cache from a 5-minute TTL to 1 hour by
+### Step away for seven minutes. Come back. You just paid $0.94 to re-read a conversation you never left.
+
+> An opencode plugin that upgrades Anthropic's prompt cache from a **5-minute TTL to 1 hour** by
 > stamping `ttl` onto the `cache_control` markers opencode already emits.
+> **~120 lines. Zero dependencies. Pure JS. Measured 92% cheaper on a 15-minute gap.**
 
-**~120 lines. Zero dependencies. Pure JS.**
+That $0.94 is not an illustration — it is a line item from a real session, a 150k-token prefix
+re-written after a 6.9-minute subagent call. The config knob you would reach for to fix it
+**does not work**, and fails silently. [Here is why, and what does.](#why-you-cant-just-configure-it)
+
+---
+
+## Is this your problem?
+
+You are in the right place if any of this sounds familiar:
+
+- Your **opencode / Claude sessions are expensive** and you cannot see where the money goes
+- The cost seems to grow the *longer* a conversation gets, even when your messages stay short
+- You stepped away for a coffee, a meeting, or a code review — and the next turn was billed like
+  the first one
+- A **subagent call** or a long tool run left the parent session idle, and resuming cost a fortune
+- You found `cacheControl` in the opencode config, set `"ttl": "1h"`, and **nothing happened —
+  no error, no effect**
+- You moved it to the model level and got `HTTP 400` with the message
+  *"…they must have matching TTLs"*
+
+The last two are the interesting ones, and the reason this repo exists: **the configuration route
+is a dead end in two different ways.** Both are documented below with the captured request bodies.
+
+> **The short version:** Anthropic's prompt cache expires **5 minutes** after the last read. Every
+> pause longer than that throws away the cached prefix, and the next turn re-writes your entire
+> conversation history at `1.25×` input price. This plugin makes that window **one hour**.
 
 ---
 
@@ -370,6 +398,33 @@ for m in json.load(sys.stdin):
 | --- | --- |
 | `read > 0` | 1h TTL is live ✅ |
 | `read = 0`, large `write` | Still on 5m — the stamp isn't reaching the request |
+
+---
+
+## The other half: keeping the cache alive past the hour
+
+This plugin extends how long a cached prefix *lives*. It does nothing about a gap longer than that
+hour — and on its own it makes those gaps **worse**, since the write it eventually pays is `2.0×`
+instead of `1.25×`.
+
+**[opencode-session-keepalive](https://github.com/klaveren/opencode-session-keepalive)** is the other
+half: it sends a minimal no-op ping just under the TTL so the cache never lapses, and disarms once
+pinging stops being cheaper than re-warming.
+
+They are designed as a pair, and the pairing is what makes each affordable:
+
+| | alone | together |
+| --- | --- | --- |
+| gap under 1 h | **cache-ttl** handles it | — |
+| gap of 4 h | neither: cache-ttl pays `2.0×`, keepalive would need a ping every 4.5 min ($5.70) | **$0.43** — 4 pings, 50 min apart |
+
+A keepalive on a 5-minute TTL has to ping every 4.5 minutes, which costs more than the re-warm it
+avoids. Raise the TTL to an hour and the same protection costs a fifteenth as much.
+
+Also from the same investigation:
+**[opencode-session-identity](https://github.com/klaveren/opencode-session-identity)** — tells an
+agent its own session id, which is what makes per-session cost measurement possible in the first
+place.
 
 ---
 

@@ -155,9 +155,34 @@ Cache pricing, as multiples of the base input price:
 | Cache **write**, 5m TTL | `1.25×` |
 | Cache **write**, 1h TTL | `2.0×` |
 
-So a 1-hour TTL makes every write **60% more expensive** — and eliminates re-warms entirely for
-any gap under an hour. The trade is worth it whenever a session gets resumed, which is the norm
-for both interactive work and agent pipelines.
+So a 1-hour TTL makes every write **60% more expensive** — and eliminates re-warms entirely for any
+gap under an hour. That is a **bet on the shape of your gaps**, and it is worth stating exactly where
+it wins and where it loses. On a 215k prefix, this is what you pay when you resume:
+
+| Gap since the last turn | Without the plugin (5m) | With the plugin (1h) | Difference |
+| --- | --- | --- | --- |
+| under 5 min | read `$0.11` | read `$0.11` | — cache alive either way |
+| **5 min – 1 h** | **write `$1.34`** | read `$0.11` | **−$1.24** ← the entire value lives here |
+| over 1 h | write `$1.34` | **write `$2.15`** | **+$0.81** ← you pay *more* |
+
+Three regimes, and the middle one is the product. Below five minutes the plugin changes nothing;
+above an hour it is a straight 60% penalty, because both caches are dead and yours was the expensive
+kind to write.
+
+**So the plugin pays off exactly when your gaps cluster between 5 minutes and an hour** — which is
+the signature of a human stepping away: a coffee, a meeting, a code review, a subagent call.
+
+⚠️ **Do not assume that describes an agent pipeline — measure it.** We assumed it and were wrong.
+Across 34 durable sessions of an event-driven agent pipeline (456 turns, **405 inter-turn gaps**),
+the profile was **bimodal**: 98.8% of gaps under 5 minutes, 0.5% between 5 minutes and an hour,
+0.7% over 3 hours, and **nothing at all** in between. A pipeline fires in bursts and then goes quiet
+for hours — it barely visits the band this plugin serves. Netted out over that history the plugin was
+a **wash** there (a couple of re-warms avoided against a few made 60% dearer), while remaining a
+decisive win on the same machine's interactive sessions.
+
+Measure your own distribution before you assume. Read `info.time.created` / `.completed` from
+`GET /session/:id/message`, diff consecutive turns, and histogram the result. It takes minutes and it
+is the difference between a real saving and a rounding error.
 
 Measured on our verification run (104,743-token prefix, Sonnet 5, 15-minute gap):
 
@@ -168,13 +193,17 @@ Measured on our verification run (104,743-token prefix, Sonnet 5, 15-minute gap)
 
 Extrapolated to the gaps we actually measured in production (200k prefix, Opus 4.8):
 
-| Real event | Before | After |
-| --- | --- | --- |
-| 6.9-min subagent wait (150k tokens) | $0.94 | **$0.08** |
-| 3.5-hour gap (215k tokens) | $1.34 | **$0.13**¹ |
-| Total re-warms in one session | $2.39 | **~$0.19** |
+| Real event | Before | After | This plugin alone? |
+| --- | --- | --- | --- |
+| 6.9-min subagent wait (150k tokens) | $0.94 | **$0.08** | ✅ yes — squarely in the 5m–1h band |
+| 3.5-hour gap (215k tokens) | $1.34 | **$0.43**¹ | ❌ no — needs `session-keepalive` |
+| Total re-warms in one session | $2.39 | **~$0.51** | mixed |
 
-¹ *Gaps beyond 1 hour still expire. Pair this with a keepalive — see `session-keepalive`.*
+¹ **Read this row carefully — it is the pair's number, not this plugin's.** A 3.5-hour gap is *past*
+the 1-hour TTL, so this plugin alone does not save it; on its own the gap gets *worse*, re-warming at
+`2.0×` = **$2.15** instead of $1.34. The $0.43 is what the gap costs when `session-keepalive` bridges
+it with 4 pings at `0.1×` — and those pings are only affordable *because* the TTL is an hour, so they
+fire every 50 minutes instead of every 4.5. Neither plugin reaches that number alone.
 
 ---
 
@@ -238,6 +267,31 @@ rules make that safe:
    the request through **completely untouched**. This plugin can never be the reason a turn breaks.
 
 Plus: the transform builds a **new** `init` object rather than mutating the caller's.
+
+### The price of those guards: it can fail silently
+
+Fail-open is the right default — but read it honestly. Guards 2 and 3 mean that if the ground shifts,
+this plugin **stops working without saying anything**:
+
+- upstream switches the request body to a stream or `Uint8Array` → guard 2 skips it;
+- Anthropic renames `cache_control`, or opencode stops emitting inline markers → nothing to stamp;
+- another plugin wraps `fetch` after this one and rebuilds the body → your stamp is discarded.
+
+In every case the request still succeeds, the TTL silently drops back to 5 minutes, and your costs
+rise ~20× on resumed sessions with **no error, no warning, nothing in the logs**. This is the
+unavoidable cost of reverse-engineering a behaviour the config does not expose.
+
+**So verify it periodically — do not assume.** Two ways:
+
+1. `"debug": true` prints one line per stamped request: `{"model":…,"markers":8,"stamped":8,"ttl":"1h"}`.
+   `markers: 0` means there was nothing to stamp — that is the failure signature.
+2. The temporal test, which proves the *effect* rather than the intent: send a turn, wait **more than
+   5 minutes but less than an hour**, send another, then read
+   `GET /session/:id/message` → `info.tokens.cache`. A large `read` with a near-zero `write` means the
+   1-hour TTL is live. A large `write` with `read: 0` means it is not — the cache died at 5 minutes.
+
+Run test 2 after any opencode upgrade. It is the only check that cannot be fooled by a plausible-looking
+request body.
 
 ### What it does not do
 

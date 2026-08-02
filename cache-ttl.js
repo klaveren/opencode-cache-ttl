@@ -65,11 +65,43 @@ const DEFAULTS = {
   enabled: true,
   /** TTL to stamp. The API accepts only "5m" and "1h". */
   ttl: '1h',
+  /**
+   * Agent names that get the upgraded TTL. EMPTY (the default) means EVERY agent — the
+   * original behaviour, preserved for compatibility.
+   *
+   * WHY THIS EXISTS (measured on a 12-story pipeline epic, 2026-08-02):
+   * a 1h write costs 2.0x input; a 5m write costs 1.25x. Upgrading an agent that never
+   * idles past 5 minutes buys nothing and pays 60% more on EVERY write. On that epic,
+   * cache write was 8% of the tokens and 59% of the bill — and moving the short-lived
+   * agents back to 5m was worth 22% of the total cost.
+   * Rule of thumb: list ONLY agents whose sessions sit idle between turns (orchestrators,
+   * on-call, interactive work). Agents that run one continuous burst want the 5m price.
+   *
+   * RESOLUTION: the running agent is read from `--agent <name>` in `process.argv`, because
+   * each `opencode run --agent X` is its own process with its own plugin instance.
+   * NO `--agent` in argv (i.e. the opencode SERVER, which multiplexes agents in a single
+   * process) → the filter cannot discriminate, so the plugin stamps everything, same as before.
+   */
+  agents: [],
   /** Log one line per modified request (stderr — stdout would corrupt the TUI protocol). */
   debug: false,
 }
 
 const VALID_TTLS = ['5m', '1h']
+
+/**
+ * Reads the agent name from `--agent <name>` (or `--agent=<name>`) in argv.
+ * Returns `null` when absent — the server case, where a single process serves many agents.
+ */
+function resolveAgentFromArgv(argv) {
+  const args = Array.isArray(argv) ? argv : []
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]
+    if (arg === '--agent') return args[i + 1] ?? null
+    if (typeof arg === 'string' && arg.startsWith('--agent=')) return arg.slice('--agent='.length) || null
+  }
+  return null
+}
 
 /**
  * Stamps `ttl` on every `cache_control` in the node. Mutates in depth and counts the changes.
@@ -101,6 +133,17 @@ export const CacheTtlPlugin = async (_ctx, options) => {
   if (!VALID_TTLS.includes(cfg.ttl)) {
     console.error(`[cache-ttl] invalid ttl '${cfg.ttl}' (expected ${VALID_TTLS.join('|')}) — plugin INACTIVE`)
     return {}
+  }
+
+  // Per-agent gate. An unlisted agent keeps opencode's own markers untouched (= 5m, the cheap write).
+  const allow = Array.isArray(cfg.agents) ? cfg.agents : []
+  if (allow.length > 0) {
+    const agent = resolveAgentFromArgv(process.argv)
+    if (agent && !allow.includes(agent)) {
+      if (cfg.debug) console.error(`[cache-ttl] agent '${agent}' not in agents=[${allow.join(',')}] — keeping 5m (plugin INACTIVE)`)
+      return {}
+    }
+    if (!agent && cfg.debug) console.error(`[cache-ttl] no --agent in argv (server mode) — filter not applicable, stamping all`)
   }
 
   const originalFetch = globalThis.fetch

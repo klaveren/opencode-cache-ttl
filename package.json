@@ -33,6 +33,9 @@
     "url": "https://github.com/klaveren/opencode-cache-ttl/issues"
   },
   "homepage": "https://github.com/klaveren/opencode-cache-ttl#readme",
+  "scripts": {
+    "test": "node --test"
+  },
   "engines": {
     "node": ">=18"
   }

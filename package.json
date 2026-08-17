@@ -34,7 +34,8 @@
   },
   "homepage": "https://github.com/klaveren/opencode-cache-ttl#readme",
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "release": "npm version patch && git push --follow-tags"
   },
   "engines": {
     "node": ">=18"
